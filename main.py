@@ -53,247 +53,256 @@ intents.presences = True
 intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# === ИНИЦИАЛИЗАЦИЯ БАЗЫ ДАННЫХ ===
+# === ГЛОБАЛЬНОЕ СОЕДИНЕНИЕ С БД ===
+_db_conn = None
+
+def get_db_connection():
+    global _db_conn
+    if _db_conn is None:
+        _db_conn = sqlite3.connect("voice_data.db", check_same_thread=False)
+        _db_conn.row_factory = sqlite3.Row
+    return _db_conn
+
 def init_db():
     os.makedirs("backups", exist_ok=True)
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS voice_sessions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            channel_id INTEGER NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS family_blacklist (
-            user_id INTEGER PRIMARY KEY,
-            reason TEXT NOT NULL,
-            added_by INTEGER NOT NULL,
-            added_at TEXT NOT NULL
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS applications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            submitted_at TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending'
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS profiles (
-            user_id INTEGER PRIMARY KEY,
-            nickname TEXT,
-            static_id TEXT
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS casino_balance (
-            user_id INTEGER PRIMARY KEY,
-            balance INTEGER NOT NULL DEFAULT 10000
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS work_timer (
-            user_id INTEGER PRIMARY KEY,
-            last_work TEXT
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS casino_ban (
-            user_id INTEGER PRIMARY KEY
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS white_list (
-            user_id INTEGER PRIMARY KEY
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS security_violations (
-            user_id INTEGER PRIMARY KEY,
-            strikes INTEGER NOT NULL DEFAULT 0
-        )
-        ''')
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS user_threads (
-            user_id INTEGER PRIMARY KEY,
-            thread_url TEXT NOT NULL
-        )
-        ''')
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS voice_sessions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        channel_id INTEGER NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS family_blacklist (
+        user_id INTEGER PRIMARY KEY,
+        reason TEXT NOT NULL,
+        added_by INTEGER NOT NULL,
+        added_at TEXT NOT NULL
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS applications (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        submitted_at TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending'
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS profiles (
+        user_id INTEGER PRIMARY KEY,
+        nickname TEXT,
+        static_id TEXT
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS casino_balance (
+        user_id INTEGER PRIMARY KEY,
+        balance INTEGER NOT NULL DEFAULT 10000
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS work_timer (
+        user_id INTEGER PRIMARY KEY,
+        last_work TEXT
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS casino_ban (
+        user_id INTEGER PRIMARY KEY
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS white_list (
+        user_id INTEGER PRIMARY KEY
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS security_violations (
+        user_id INTEGER PRIMARY KEY,
+        strikes INTEGER NOT NULL DEFAULT 0
+    )
+    ''')
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS user_threads (
+        user_id INTEGER PRIMARY KEY,
+        thread_url TEXT NOT NULL
+    )
+    ''')
+    conn.commit()
 
-# === ФУНКЦИИ ДЛЯ РАБОТЫ С БД ===
+# === ФУНКЦИИ ДЛЯ РАБОТЫ С БД (используют одно соединение) ===
 def get_balance(user_id: int) -> int:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT balance FROM casino_balance WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        if result is None:
-            cursor.execute("INSERT INTO casino_balance (user_id, balance) VALUES (?, 10000)", (user_id,))
-            conn.commit()
-            return 10000
-        return result[0]
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT balance FROM casino_balance WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    if result is None:
+        cursor.execute("INSERT INTO casino_balance (user_id, balance) VALUES (?, 10000)", (user_id,))
+        conn.commit()
+        return 10000
+    return result[0]
 
 def set_balance(user_id: int, amount: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO casino_balance (user_id, balance) VALUES (?, ?)", (user_id, max(0, amount)))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO casino_balance (user_id, balance) VALUES (?, ?)", (user_id, max(0, amount)))
+    conn.commit()
 
 def is_casino_banned(user_id: int) -> bool:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM casino_ban WHERE user_id = ?", (user_id,))
-        return cursor.fetchone() is not None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM casino_ban WHERE user_id = ?", (user_id,))
+    return cursor.fetchone() is not None
 
 def ban_from_casino(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO casino_ban (user_id) VALUES (?)", (user_id,))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO casino_ban (user_id) VALUES (?)", (user_id,))
+    conn.commit()
 
 def unban_from_casino(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM casino_ban WHERE user_id = ?", (user_id,))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM casino_ban WHERE user_id = ?", (user_id,))
+    conn.commit()
 
 def can_work(user_id: int) -> bool:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT last_work FROM work_timer WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        if not result:
-            return True
-        last_work = datetime.fromisoformat(result[0].replace("Z", "+00:00"))
-        return datetime.now(timezone.utc) - last_work > timedelta(minutes=5)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT last_work FROM work_timer WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    if not result:
+        return True
+    last_work = datetime.fromisoformat(result[0].replace("Z", "+00:00"))
+    return datetime.now(timezone.utc) - last_work > timedelta(minutes=5)
 
 def update_work_time(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        now = datetime.now(timezone.utc).isoformat()
-        cursor.execute("INSERT OR REPLACE INTO work_timer (user_id, last_work) VALUES (?, ?)", (user_id, now))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now(timezone.utc).isoformat()
+    cursor.execute("INSERT OR REPLACE INTO work_timer (user_id, last_work) VALUES (?, ?)", (user_id, now))
+    conn.commit()
 
 def add_voice_session(user_id: int, channel_id: int, start_time: datetime):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT INTO voice_sessions (user_id, channel_id, start_time, end_time) VALUES (?, ?, ?, ?)",
-            (user_id, channel_id, start_time.isoformat(), None)
-        )
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO voice_sessions (user_id, channel_id, start_time, end_time) VALUES (?, ?, ?, ?)",
+        (user_id, channel_id, start_time.isoformat(), None)
+    )
+    conn.commit()
 
 def end_voice_session(user_id: int, end_time: datetime):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE voice_sessions SET end_time = ? WHERE user_id = ? AND end_time IS NULL",
-            (end_time.isoformat(), user_id)
-        )
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "UPDATE voice_sessions SET end_time = ? WHERE user_id = ? AND end_time IS NULL",
+        (end_time.isoformat(), user_id)
+    )
+    conn.commit()
 
 def get_user_sessions(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT channel_id, start_time, end_time FROM voice_sessions WHERE user_id = ? ORDER BY start_time DESC LIMIT 20",
-            (user_id,)
-        )
-        return cursor.fetchall()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT channel_id, start_time, end_time FROM voice_sessions WHERE user_id = ? ORDER BY start_time DESC LIMIT 20",
+        (user_id,)
+    )
+    return cursor.fetchall()
 
 def add_to_family_blacklist(user_id: int, reason: str, added_by: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        now = datetime.now(timezone.utc).isoformat()
-        cursor.execute(
-            "INSERT OR REPLACE INTO family_blacklist (user_id, reason, added_by, added_at) VALUES (?, ?, ?, ?)",
-            (user_id, reason, added_by, now)
-        )
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now(timezone.utc).isoformat()
+    cursor.execute(
+        "INSERT OR REPLACE INTO family_blacklist (user_id, reason, added_by, added_at) VALUES (?, ?, ?, ?)",
+        (user_id, reason, added_by, now)
+    )
+    conn.commit()
 
 def remove_from_family_blacklist(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM family_blacklist WHERE user_id = ?", (user_id,))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM family_blacklist WHERE user_id = ?", (user_id,))
+    conn.commit()
 
 def is_in_family_blacklist(user_id: int) -> bool:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM family_blacklist WHERE user_id = ?", (user_id,))
-        return cursor.fetchone() is not None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM family_blacklist WHERE user_id = ?", (user_id,))
+    return cursor.fetchone() is not None
 
 def get_blacklist_reason(user_id: int) -> str:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT reason FROM family_blacklist WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        return result[0] if result else "Не указана"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT reason FROM family_blacklist WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else "Не указана"
 
 def can_submit_application(user_id: int) -> bool:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        one_day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
-        cursor.execute(
-            "SELECT 1 FROM applications WHERE user_id = ? AND submitted_at > ?",
-            (user_id, one_day_ago)
-        )
-        return cursor.fetchone() is None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    one_day_ago = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    cursor.execute(
+        "SELECT 1 FROM applications WHERE user_id = ? AND submitted_at > ?",
+        (user_id, one_day_ago)
+    )
+    return cursor.fetchone() is None
 
 def record_application(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        now = datetime.now(timezone.utc).isoformat()
-        cursor.execute(
-            "INSERT INTO applications (user_id, submitted_at) VALUES (?, ?)",
-            (user_id, now)
-        )
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now(timezone.utc).isoformat()
+    cursor.execute(
+        "INSERT INTO applications (user_id, submitted_at) VALUES (?, ?)",
+        (user_id, now)
+    )
+    conn.commit()
 
 def get_pending_applications_count() -> int:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM applications WHERE status = 'pending'")
-        return cursor.fetchone()[0]
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM applications WHERE status = 'pending'")
+    return cursor.fetchone()[0]
 
 def get_last_application_time() -> str:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT submitted_at FROM applications ORDER BY submitted_at DESC LIMIT 1")
-        result = cursor.fetchone()
-        if not result:
-            return "Никогда"
-        dt = datetime.fromisoformat(result[0].replace("Z", "+00:00"))
-        now = datetime.now(timezone.utc)
-        diff = now - dt
-        hours = int(diff.total_seconds() // 3600)
-        if hours < 1:
-            return "менее часа назад"
-        elif hours == 1:
-            return "1 час назад"
-        else:
-            return f"{hours} часов назад"
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT submitted_at FROM applications ORDER BY submitted_at DESC LIMIT 1")
+    result = cursor.fetchone()
+    if not result:
+        return "Никогда"
+    dt = datetime.fromisoformat(result[0].replace("Z", "+00:00"))
+    now = datetime.now(timezone.utc)
+    diff = now - dt
+    hours = int(diff.total_seconds() // 3600)
+    if hours < 1:
+        return "менее часа назад"
+    elif hours == 1:
+        return "1 час назад"
+    else:
+        return f"{hours} часов назад"
 
 def save_profile(user_id: int, nickname: str, static_id: str):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute(
-            "INSERT OR REPLACE INTO profiles (user_id, nickname, static_id) VALUES (?, ?, ?)",
-            (user_id, nickname, static_id)
-        )
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT OR REPLACE INTO profiles (user_id, nickname, static_id) VALUES (?, ?, ?)",
+        (user_id, nickname, static_id)
+    )
+    conn.commit()
 
 def get_profile(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT nickname, static_id FROM profiles WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        return result
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT nickname, static_id FROM profiles WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    return result
 
 def get_all_family_members(guild: discord.Guild) -> list:
     members = []
@@ -305,50 +314,50 @@ def get_all_family_members(guild: discord.Guild) -> list:
     return members
 
 def is_in_white_list(user_id: int) -> bool:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1 FROM white_list WHERE user_id = ?", (user_id,))
-        return cursor.fetchone() is not None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT 1 FROM white_list WHERE user_id = ?", (user_id,))
+    return cursor.fetchone() is not None
 
 def add_to_white_list(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO white_list (user_id) VALUES (?)", (user_id,))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO white_list (user_id) VALUES (?)", (user_id,))
+    conn.commit()
 
 def get_strikes(user_id: int) -> int:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT strikes FROM security_violations WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        return result[0] if result else 0
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT strikes FROM security_violations WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else 0
 
 def add_strike(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        current = get_strikes(user_id)
-        cursor.execute("INSERT OR REPLACE INTO security_violations (user_id, strikes) VALUES (?, ?)", (user_id, current + 1))
-        conn.commit()
-        return current + 1
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    current = get_strikes(user_id)
+    cursor.execute("INSERT OR REPLACE INTO security_violations (user_id, strikes) VALUES (?, ?)", (user_id, current + 1))
+    conn.commit()
+    return current + 1
 
 def reset_strikes(user_id: int):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("DELETE FROM security_violations WHERE user_id = ?", (user_id,))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM security_violations WHERE user_id = ?", (user_id,))
+    conn.commit()
 
 def save_thread_link(user_id: int, thread_id: str):
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("INSERT OR REPLACE INTO user_threads (user_id, thread_url) VALUES (?, ?)", (user_id, thread_id))
-        conn.commit()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("INSERT OR REPLACE INTO user_threads (user_id, thread_url) VALUES (?, ?)", (user_id, thread_id))
+    conn.commit()
 
 def get_thread_link(user_id: int) -> str:
-    with sqlite3.connect("voice_data.db") as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT thread_url FROM user_threads WHERE user_id = ?", (user_id,))
-        result = cursor.fetchone()
-        return result[0] if result else None
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT thread_url FROM user_threads WHERE user_id = ?", (user_id,))
+    result = cursor.fetchone()
+    return result[0] if result else None
 
 # === ЛОГИРОВАНИЕ ===
 async def log_action(guild, action: str, details: str, color=0x2b2d31):
@@ -1545,6 +1554,15 @@ async def on_message(message):
         "- Чтобы отправить скриншот — просто прикрепите изображение\n"
         "- Команды работают только на сервере!"
     )
+
+import atexit
+
+def close_db():
+    global _db_conn
+    if _db_conn:
+        _db_conn.close()
+
+atexit.register(close_db)
 
 # === ЗАПУСК ===
 if __name__ == "__main__":
