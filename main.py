@@ -59,74 +59,74 @@ def init_db():
     with sqlite3.connect("voice_data.db") as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS voice_sessions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                channel_id INTEGER NOT NULL,
-                start_time TEXT NOT NULL,
-                end_time TEXT
-            )
+        CREATE TABLE IF NOT EXISTS voice_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            channel_id INTEGER NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS family_blacklist (
-                user_id INTEGER PRIMARY KEY,
-                reason TEXT NOT NULL,
-                added_by INTEGER NOT NULL,
-                added_at TEXT NOT NULL
-            )
+        CREATE TABLE IF NOT EXISTS family_blacklist (
+            user_id INTEGER PRIMARY KEY,
+            reason TEXT NOT NULL,
+            added_by INTEGER NOT NULL,
+            added_at TEXT NOT NULL
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS applications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL,
-                submitted_at TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending'
-            )
+        CREATE TABLE IF NOT EXISTS applications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            submitted_at TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending'
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS profiles (
-                user_id INTEGER PRIMARY KEY,
-                nickname TEXT,
-                static_id TEXT
-            )
+        CREATE TABLE IF NOT EXISTS profiles (
+            user_id INTEGER PRIMARY KEY,
+            nickname TEXT,
+            static_id TEXT
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS casino_balance (
-                user_id INTEGER PRIMARY KEY,
-                balance INTEGER NOT NULL DEFAULT 10000
-            )
+        CREATE TABLE IF NOT EXISTS casino_balance (
+            user_id INTEGER PRIMARY KEY,
+            balance INTEGER NOT NULL DEFAULT 10000
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS work_timer (
-                user_id INTEGER PRIMARY KEY,
-                last_work TEXT
-            )
+        CREATE TABLE IF NOT EXISTS work_timer (
+            user_id INTEGER PRIMARY KEY,
+            last_work TEXT
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS casino_ban (
-                user_id INTEGER PRIMARY KEY
-            )
+        CREATE TABLE IF NOT EXISTS casino_ban (
+            user_id INTEGER PRIMARY KEY
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS white_list (
-                user_id INTEGER PRIMARY KEY
-            )
+        CREATE TABLE IF NOT EXISTS white_list (
+            user_id INTEGER PRIMARY KEY
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS security_violations (
-                user_id INTEGER PRIMARY KEY,
-                strikes INTEGER NOT NULL DEFAULT 0
-            )
+        CREATE TABLE IF NOT EXISTS security_violations (
+            user_id INTEGER PRIMARY KEY,
+            strikes INTEGER NOT NULL DEFAULT 0
+        )
         ''')
         cursor.execute('''
-            CREATE TABLE IF NOT EXISTS user_threads (
-                user_id INTEGER PRIMARY KEY,
-                thread_url TEXT NOT NULL
-            )
+        CREATE TABLE IF NOT EXISTS user_threads (
+            user_id INTEGER PRIMARY KEY,
+            thread_url TEXT NOT NULL
+        )
         ''')
         conn.commit()
 
-# === ФУНКЦИИ ДЛЯ РАБОТЫ С БД (с использованием `with`) ===
+# === ФУНКЦИИ ДЛЯ РАБОТЫ С БД ===
 def get_balance(user_id: int) -> int:
     with sqlite3.connect("voice_data.db") as conn:
         cursor = conn.cursor()
@@ -394,7 +394,6 @@ def backup_guild(guild: discord.Guild):
                 "roles": roles,
                 "joined_at": member.joined_at.isoformat() if member.joined_at else None
             })
-
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     filename = f"backups/backup_{timestamp}.json"
     with open(filename, "w", encoding="utf-8") as f:
@@ -428,7 +427,14 @@ async def backup_task():
 @bot.event
 async def on_ready():
     print(f'✅ Бот {bot.user} запущен!')
-    print(f'💡 Отправьте "!sync" для синхронизации слэш-команд.')
+
+    # ВРЕМЕННО: синхронизация при старте (удалить после теста!)
+    try:
+        synced = await bot.tree.sync()
+        print(f'[AUTO-SYNC] Загружено {len(synced)} слэш-команд.')
+    except Exception as e:
+        print(f'[AUTO-SYNC ERROR] {e}')
+
     bot.loop.create_task(change_status())
     bot.loop.create_task(backup_task())
 
@@ -452,7 +458,6 @@ async def on_member_update(before, after):
     added_roles = set(after.roles) - set(before.roles)
     if not added_roles:
         return
-
     family_role_ids = set(FAMILY_ROLES.values())
     given_family_roles = [r for r in added_roles if r.id in family_role_ids]
     if not given_family_roles or not is_in_family_blacklist(after.id):
@@ -485,16 +490,16 @@ async def on_member_update(before, after):
     await log_action(after.guild, "Попытка выдать роль участнику из ЧС", details, color=0xff0000)
 
 # === !sync ===
-@bot.command(name="sync")
-async def sync_command(ctx):
+@bot.command()
+async def sync(ctx):
+    """Синхронизация слэш-команд"""
     if ctx.author.id != OWNER_ID:
-        await ctx.send("❌ Только владелец может использовать эту команду.")
         return
     try:
         synced = await bot.tree.sync()
-        await ctx.send(f"✅ Синхронизировано {len(synced)} слэш-команд.")
+        await ctx.send(f"✅ Синхронизировано команд: {len(synced)}")
     except Exception as e:
-        await ctx.send(f"❌ Ошибка: {e}")
+        await ctx.send(f"❌ Ошибка синхронизации: {e}")
 
 # === /выдать_вайт ===
 @bot.tree.command(name="выдать_вайт", description="Добавить пользователя в вайт-лист")
@@ -522,7 +527,6 @@ async def reset_all_cooldowns(interaction: discord.Interaction):
         cursor.execute("DELETE FROM applications")
         cursor.execute("DELETE FROM work_timer")
         conn.commit()
-
     embed = discord.Embed(
         title="🔄 Все кулдауны сброшены!",
         description=f"Заместитель {interaction.user.mention} сбросил все кулдауны для участников семьи.",
@@ -586,7 +590,6 @@ async def handle_security_violation(guild, user, action):
         return
     if not any(role.id in FAMILY_ROLES.values() for role in user.roles):
         return
-
     strikes = add_strike(user.id)
 
     if strikes == 1:
@@ -624,7 +627,6 @@ async def blacklist_family(interaction: discord.Interaction, user_id: str, reaso
     except ValueError:
         await interaction.response.send_message("❌ ID должен быть числом.", ephemeral=True)
         return
-
     member = interaction.guild.get_member(uid)
     if not member:
         await interaction.response.send_message("❌ Пользователь не найден на сервере.", ephemeral=True)
@@ -669,7 +671,6 @@ async def unblacklist_family(interaction: discord.Interaction, user_id: str):
     except ValueError:
         await interaction.response.send_message("❌ ID должен быть числом.", ephemeral=True)
         return
-
     if not is_in_family_blacklist(uid):
         await interaction.response.send_message("❌ Пользователь не в чёрном списке семьи.", ephemeral=True)
         return
@@ -705,7 +706,6 @@ async def recruitment(interaction: discord.Interaction, channel_id: str):
     except ValueError:
         await interaction.response.send_message("❌ ID канала должен быть числом.", ephemeral=True)
         return
-
     target_channel = interaction.guild.get_channel(cid)
     if not target_channel or not isinstance(target_channel, discord.TextChannel):
         await interaction.response.send_message("❌ Канал не найден или недоступен.", ephemeral=True)
@@ -975,7 +975,7 @@ async def family_members(interaction: discord.Interaction):
         (FAMILY_ROLES["newbie"], "[ɴᴇᴡʙɪᴇ]"),
     ]
     embed = discord.Embed(
-        title="👨‍👩‍👧‍👦 Состав семьи **Mercuri Famq**",
+        title="👨‍👩‍👧‍👦 Состав семьи Mercuri Famq",
         color=0xc41e3a,
         timestamp=discord.utils.utcnow()
     )
@@ -1006,7 +1006,7 @@ async def family_members(interaction: discord.Interaction):
                 embed.add_field(name=f"{rank_name} (продолжение)", value=part2, inline=False)
     if len(embed) > 6000:
         embed = discord.Embed(
-            title="👨‍👩‍👧‍👦 Состав семьи **Mercuri Famq**",
+            title="👨‍👩‍👧‍👦 Состав семьи Mercuri Famq",
             description="Семья слишком велика для отображения.",
             color=0xc41e3a
         )
@@ -1037,11 +1037,11 @@ async def user_state(interaction: discord.Interaction, user: discord.User):
         name = channel.name if channel else f"ID:{channel_id}"
         duration = int((end - start).total_seconds() // 60)
         total_seconds += (end - start).total_seconds()
-        details.append(f"🎙️ **{name}** — {start.strftime('%d.%m %H:%M')} → {end.strftime('%H:%M')} ({duration} мин)")
+        details.append(f"🎙️ {name} — {start.strftime('%d.%m %H:%M')} → {end.strftime('%H:%M')} ({duration} мин)")
     hours, minutes = divmod(int(total_seconds // 60), 60)
     embed = discord.Embed(
         title=f"📊 Голосовая активность: {user.display_name}",
-        description=f"**Общее время:** {hours} ч {minutes} мин",
+        description=f"Общее время: {hours} ч {minutes} мин",
         color=0xc41e3a
     )
     embed.add_field(name="Последние сессии", value="\n".join(details) or "Нет данных", inline=False)
@@ -1053,6 +1053,7 @@ async def profile_command(interaction: discord.Interaction):
     if FAMILY_ROLES["common"] not in [role.id for role in interaction.user.roles]:
         await interaction.response.send_message("❌ Эта команда доступна только участникам семьи.", ephemeral=True)
         return
+
     class ProfileModal(discord.ui.Modal, title="Ваш профиль семьи"):
         def __init__(self):
             super().__init__()
@@ -1074,6 +1075,7 @@ async def profile_command(interaction: discord.Interaction):
         async def on_submit(self, inter: discord.Interaction):
             save_profile(inter.user.id, self.nick.value, self.static_id.value)
             await inter.response.send_message("✅ Ваш профиль успешно сохранён!", ephemeral=True)
+
     await interaction.response.send_modal(ProfileModal())
 
 # === /посмотреть_профиль ===
@@ -1163,6 +1165,7 @@ def create_casino_view(user_id: int):
         @discord.ui.button(label="🎡 Рулетка", style=discord.ButtonStyle.grey, emoji="🎡")
         async def roulette_button(self, inter: discord.Interaction, button: discord.ui.Button):
             await inter.response.send_modal(RouletteModal(min_bet=1000, user_id=user_id))
+
     return CasinoView()
 
 class DiceModal(discord.ui.Modal, title="🎲 Кости"):
@@ -1343,7 +1346,7 @@ async def top_casino(interaction: discord.Interaction):
     for i, (user_id, balance) in enumerate(top_players, 1):
         user = await bot.fetch_user(user_id)
         name = user.display_name if user else f"ID: {user_id}"
-        description += f"{i}. **{name}** — ${balance:,}\n"
+        description += f"{i}. {name} — ${balance:,}\n"
     embed = discord.Embed(title="🏆 Топ-10 казино", description=description, color=0xf1c40f)
     await interaction.response.send_message(embed=embed)
 
@@ -1361,7 +1364,7 @@ async def work_command(interaction: discord.Interaction):
     update_work_time(interaction.user.id)
     embed = discord.Embed(
         title="💼 Работа завершена!",
-        description=f"Вы заработали **$10,000**!\nВаш новый баланс: **${new_balance:,}**",
+        description=f"Вы заработали $10,000!\nВаш новый баланс: ${new_balance:,}",
         color=0x2ecc71
     )
     await interaction.response.send_message(embed=embed)
@@ -1380,7 +1383,7 @@ async def give_money(interaction: discord.Interaction, member: discord.Member, a
     set_balance(member.id, new_balance)
     embed = discord.Embed(
         title="💸 Выдача денег",
-        description=f"Заместитель {interaction.user.mention} выдал **${amount:,}** участнику {member.mention}.",
+        description=f"Заместитель {interaction.user.mention} выдал ${amount:,} участнику {member.mention}.",
         color=0x2ecc71
     )
     embed.add_field(name="Новый баланс", value=f"${new_balance:,}", inline=False)
@@ -1415,7 +1418,7 @@ async def reset_all_balances(interaction: discord.Interaction):
         conn.commit()
     embed = discord.Embed(
         title="🔄 Все балансы сброшены!",
-        description=f"Заместитель {interaction.user.mention} сбросил балансы всех участников семьи до **$10,000**.",
+        description=f"Заместитель {interaction.user.mention} сбросил балансы всех участников семьи до $10,000.",
         color=0xff0000
     )
     embed.add_field(name="Затронуто участников", value=str(len(members)), inline=False)
@@ -1441,7 +1444,7 @@ async def give_money_to_all(interaction: discord.Interaction, amount: int):
         conn.commit()
     embed = discord.Embed(
         title="💸 Массовая выдача денег",
-        description=f"Заместитель {interaction.user.mention} выдал **${amount:,}** каждому участнику семьи.",
+        description=f"Заместитель {interaction.user.mention} выдал ${amount:,} каждому участнику семьи.",
         color=0x2ecc71
     )
     embed.add_field(name="Получателей", value=str(len(members)), inline=True)
@@ -1471,7 +1474,6 @@ async def on_message(message):
     if message.author == bot.user or message.guild is not None:
         return
     content = message.content.strip()
-
     if "https://discord.com/channels/" in content:
         try:
             parts = content.split("/")
@@ -1508,13 +1510,21 @@ async def on_message(message):
                 timestamp=discord.utils.utcnow()
             )
             embed.set_image(url=message.attachments[0].url)
-            owner = message.guild.get_role(OWNER_ROLE_ID)
-            dep_owner = message.guild.get_role(DEP_OWNER_ROLE_ID)
+
+            # 🔧 ИСПРАВЛЕНО: используем thread.guild, а не message.guild
+            guild = thread.guild
+            if not guild:
+                await message.channel.send("❌ Ветка не привязана к серверу.")
+                return
+
+            owner = guild.get_role(OWNER_ROLE_ID)
+            dep_owner = guild.get_role(DEP_OWNER_ROLE_ID)
             ping_text = ""
             if owner:
                 ping_text += owner.mention + " "
             if dep_owner:
                 ping_text += dep_owner.mention
+
             await thread.send(content=ping_text, embed=embed)
             await message.channel.send("✅ Скриншот отправлен в вашу ветку!")
         except discord.NotFound:
