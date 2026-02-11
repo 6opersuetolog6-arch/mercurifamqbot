@@ -1,0 +1,9 @@
+# Секреты
+.env
+
+# База данных
+voice_data.db
+
+# Кэш Python
+__pycache__/
+*.pyc
